@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tina小作坊</title>
+<meta name="description" content="Tina 的个人工作台">
+<meta name="theme-color" content="#FADFEA">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tina小作坊">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <button class="icon-btn" data-act="menu" aria-label="打开导航">☰</button>
+  <a class="brand" href="#/home"><img src="icons/icon.svg" alt=""><span>Tina小作坊</span></a>
+  <span class="top-title" id="topTitle"></span>
+</header>
+
+<button class="handle" id="handle" data-act="menu" aria-label="划开导航"><span>›</span><span class="h-heart">♥</span></button>
+<div class="scrim" id="scrim" data-act="close-drawer"></div>
+<nav class="drawer" id="drawer" aria-label="导航"></nav>
+
+<main id="main"></main>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<div id="lock" class="lock" hidden>
+  <form class="lock-box" id="lockForm" autocomplete="off">
+    <img src="icons/icon-192.png" alt="">
+    <h2>Tina小作坊</h2>
+    <p class="muted">输入 PIN 解锁</p>
+    <input id="lockPin" type="password" inputmode="numeric" maxlength="8" aria-label="PIN">
+    <button class="btn primary" type="submit">解锁</button>
+    <p class="small" id="lockMsg" style="color:var(--bad)"></p>
+  </form>
+</div>
+
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+<script src="app.js"></script>
+</body>
+</html>
