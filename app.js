@@ -475,7 +475,9 @@ function calHtml() {
     <div class="cal-week">${WEEK.map(w => `<span>${w}</span>`).join('')}</div>
     <div class="cal-grid ${calAnim}">${cells}</div>
     <div class="cal-legend"><span><i class="dot ev"></i>事件提醒</span>${msStatus() !== 'off' ? '<span><i class="dot ms"></i>Outlook / Teams</span>' : ''}<span><i class="dot pl"></i>未完成的每日计划</span><span>点日期可以新增</span></div>
-    ${msStatus() === 'ok' && msCalError ? `<p class="small" style="color:var(--bad);margin:6px 0 0">⚠️ Outlook 日历读取失败：${esc(msCalError)}</p>` : ''}`;
+    ${msStatus() === 'ok' && msCalError ? `<p class="small" style="color:var(--bad);margin:6px 0 0">⚠️ Outlook 日历读取失败：${esc(msCalError)}</p>` : ''}
+    ${msStatus() === 'idle' || msStatus() === 'expired' ? `<div class="ms-hint"><span>${msStatus() === 'expired' ? '微软登录过期了，Outlook / Teams 会议暂时没更新' : '还没登录微软账号，Outlook / Teams 会议还不会显示'}</span>
+      <button class="btn primary sm" data-act="ms-login">${msStatus() === 'expired' ? '重新连接' : '连接 Outlook 日历'}</button></div>` : ''}`;
 }
 function redrawCal() { const el = $('#cal'); if (el) el.innerHTML = calHtml(); calAnim = ''; }
 function syncCal(force) { msSyncCalendar(calStart, 28, force).then(changed => { if (changed && currentRoute() === 'home') redrawCal(); }); }
@@ -613,10 +615,9 @@ function backupNotice() {
 }
 function viewHome() {
   pageTitle = '';
-  after = () => { bindCalSwipe(); loadNews(false); syncCal(); msLoadMail(false); };
+  after = () => { bindCalSwipe(); loadNews(false); syncCal(); };
   return `${backupNotice()}
     <section class="card cal-card" id="cal">${calHtml()}</section>
-    <section class="card" id="mail">${mailHtml()}</section>
     <section class="card" id="news">${newsHtml()}</section>
     <h2 class="sec-title">💜 我的模块</h2>
     <div class="tiles">${tilesHtml()}</div>`;
@@ -776,7 +777,7 @@ function msSettingsHtml() {
     ok: `<span class="badge good">✓ 已连接${cfg.me ? ' · ' + esc(cfg.me.name || cfg.me.email) : ''}</span>`,
   }[st];
   return `<section class="card"><div class="sec-head"><h2>🔗 连接 Microsoft 365（Outlook / Teams）</h2>${status}</div>
-    <p class="muted small">只读：把 Outlook / Teams 会议显示在月历上，并在首页整理每日电邮。不会修改、删除或发送任何东西。登录凭证只存在这台设备里，不会导出到备份文件。</p>
+    <p class="muted small">只读：把 Outlook / Teams 会议显示在月历上，不会读取邮件，也不会修改或删除任何会议。登录凭证只存在这台设备里，不会导出到备份文件。</p>
     <form data-ms-form novalidate>
       <div class="form-grid">
         ${fieldHtml({ k: 'clientId', label: '应用（客户端）ID', ph: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' }, cfg.clientId)}
@@ -851,8 +852,6 @@ document.addEventListener('visibilitychange', () => {
   if (db.settings.pinHash && hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) showLock();
   else if (currentRoute() === 'home') {
     loadNews(false); syncCal();
-    if (mailState.day < todayStr() && mailState.data && mailState.data.day === mailState.day) mailState.day = todayStr();
-    msLoadMail(false);
   }
 });
 
@@ -977,13 +976,7 @@ const ACTIONS = {
     },
   }),
   'ms-login': () => msLogin(),
-  'ms-disconnect': () => { if (confirm('断开后，月历上的 Outlook 会议和电邮总结会消失，确定吗？')) { msDisconnect(); commit('已断开连接'); } },
-  'mail-day': ({ n }) => {
-    const next = ymd(addDays(parseYmd(mailState.day), Number(n)));
-    if (next > todayStr()) return;
-    mailState.day = next; redrawMail(); msLoadMail(false);
-  },
-  'mail-refresh': () => msLoadMail(true),
+  'ms-disconnect': () => { if (confirm('断开后，月历上的 Outlook / Teams 会议会消失，确定吗？')) { msDisconnect(); commit('已断开连接'); } },
   'pin-off': () => { if (confirm('确定关闭 PIN 锁吗？')) { delete db.settings.pinHash; commit('PIN 已关闭'); } },
 };
 function removeItem(mod, id) {
@@ -1135,7 +1128,6 @@ window.addEventListener('hashchange', () => render(true));
 
 /* ================= boot ================= */
 buildNav();
-mailState.day = todayStr();
 const msPending = msHandleRedirect(); // 微软登录回来时先把网址整理好
 if (db.settings.pinHash) showLock(); else render();
 if (msPending) msPending.then(() => render(false));
