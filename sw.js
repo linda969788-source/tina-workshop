@@ -1,5 +1,5 @@
 // Tina小作坊 — 离线缓存：有网时先取最新版本（3 秒超时），没网时用缓存。
-const CACHE = 'tina-v4';
+const CACHE = 'tina-v5';
 const ASSETS = ['./', './index.html', './style.css', './ms.js', './app.js', './manifest.webmanifest',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 

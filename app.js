@@ -627,7 +627,8 @@ function viewHome() {
 const EVENT_FIELDS = [
   { k: 'title', label: '事件 / 约会', req: true, ph: '例如 和 XX 银行开会' },
   { k: 'date', label: '日期', type: 'date', def: 'today', req: true },
-  { k: 'time', label: '时间（可不填）', type: 'time' },
+  { k: 'time', label: '开始时间（可不填）', type: 'time' },
+  { k: 'endTime', label: '结束时间（可不填）', type: 'time' },
   { k: 'note', label: '备注', type: 'textarea' },
 ];
 function relLabel(ds) {
@@ -666,7 +667,7 @@ function viewDaily(ds) {
     </section>
     <section class="card">
       <div class="sec-head"><h2>⏰ 事件提醒 / Appt</h2><button class="btn primary sm" data-act="ev-add" data-date="${ds}">＋ 新增</button></div>
-      ${evs.length ? `<ul class="ev-list">${evs.map(e => `<li data-act="ev-edit" data-id="${e.id}"><span class="ev-time">${e.time ? esc(e.time) : '全天'}</span>
+      ${evs.length ? `<ul class="ev-list">${evs.map(e => `<li data-act="ev-edit" data-id="${e.id}"><span class="ev-time">${e.time ? esc(e.time) : '全天'}${e.endTime ? `<br><span class="muted small">${esc(e.endTime)}</span>` : ''}</span>
         <div class="ev-body"><b>${esc(e.title)}</b>${e.note ? `<div class="muted small pre">${esc(e.note)}</div>` : ''}</div></li>`).join('')}</ul>` : '<p class="muted small">这天没有事件，点「新增」记一个约会或提醒</p>'}
     </section>
     ${msDayHtml(ds)}
@@ -758,7 +759,7 @@ function viewSettings() {
   const count = LISTS.reduce((a, k) => a + db[k].length, 0);
   return `<div class="page-head"><h1>设置与备份</h1></div>
     <section class="card"><div class="settings-row"><div><h2>💾 备份数据</h2>
-      <p class="muted small">所有资料只存在这台设备的浏览器里（目前 ${count} 条）。建议每两周备份一次；换手机、在电脑和手机之间同步，都是用「导出」再「导入」。</p>
+      <p class="muted small">所有资料只存在这台设备的浏览器里（目前 ${count} 条）。建议每两周备份一次；换手机、在电脑和手机之间同步，都是用「导出」再「导入」。Claude 帮你整理的「新增文件」也是用「导入」，只会加进来，不会覆盖原有资料。</p>
       <p class="small">${st.lastBackup ? '上次备份：' + fmtTime(st.lastBackup) : '还没有备份过'}</p></div>
       <div class="detail-actions"><button class="btn primary" data-act="export">导出备份</button><button class="btn" data-act="import">导入备份</button></div></div></section>
     <section class="card"><div class="settings-row"><div><h2>🔒 PIN 锁</h2>
@@ -821,6 +822,7 @@ function importData(file) {
       const j = JSON.parse(reader.result);
       const data = j && j.data ? j.data : j;
       if (!data || !LISTS.some(k => Array.isArray(data[k]))) throw new Error('bad');
+      if (j.kind === 'add') return mergeData(data);
       if (!confirm('导入会用备份文件替换这台设备上现在的所有资料，确定吗？')) return;
       const pin = db.settings.pinHash;
       db = normalize(data);
@@ -830,6 +832,21 @@ function importData(file) {
     } catch (e) { toast('这不是 Tina小作坊 的备份文件'); }
   };
   reader.readAsText(file);
+}
+/** 「新增文件」（kind: 'add'）：只把里面的条目加进来，不覆盖原有资料；同一个文件导入两次也不会重复。 */
+function mergeData(data) {
+  const fresh = LISTS.flatMap(k => (Array.isArray(data[k]) ? data[k] : [])
+    .filter(x => x && x.id && !db[k].some(y => y.id === x.id)).map(x => [k, x]));
+  if (!fresh.length) { toast('这些内容之前已经加过了'); return; }
+  const preview = fresh.slice(0, 8).map(([k, x]) => k === 'events'
+    ? `· ${shortYmd(x.date).slice(5)} ${x.time || ''}${x.endTime ? '–' + x.endTime : ''} ${x.title}`
+    : `· ${x.title || x.name || x.text || x.topic || ''}`).join('\n');
+  if (!confirm(`要加入下面 ${fresh.length} 项吗？原来的资料不会被覆盖。\n\n${preview}${fresh.length > 8 ? '\n…' : ''}`)) return;
+  fresh.forEach(([k, x]) => db[k].push({ created: Date.now(), ...x }));
+  save();
+  location.hash = '#/home';
+  render(false);
+  toast(`已加入 ${fresh.length} 项 ♥`);
 }
 
 /* ---- lock screen ---- */
