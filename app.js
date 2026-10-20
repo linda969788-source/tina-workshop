@@ -451,12 +451,12 @@ function calHtml() {
   let cells = '';
   for (let i = 0; i < 28; i++) {
     const d = addDays(calStart, i), ds = ymd(d);
-    const evs = db.events.filter(e => e.date === ds).sort(byTime);
+    const evs = [
+      ...db.events.filter(e => e.date === ds).map(e => ({ c: 'ev', time: e.time, t: e.title })),
+      ...msEventsOn(ds).map(e => ({ c: 'ms', time: e.allDay ? '' : e.time, t: e.title })),
+    ].sort(byTime);
     const pls = db.plans.filter(p => p.date === ds && !p.done);
-    const items = [
-      ...evs.map(e => ({ c: 'ev', time: e.time, t: e.title })),
-      ...pls.map(p => ({ c: 'pl', t: p.text })),
-    ];
+    const items = [...evs, ...pls.map(p => ({ c: 'pl', t: p.text }))];
     const first = d.getDate() === 1 || i === 0;
     const cls = ['cell', ds === t && 'today', ds < t && 'past', i % 7 >= 5 && 'wkend', d.getDate() === 1 && 'month-start'].filter(Boolean).join(' ');
     cells += `<a class="${cls}" href="#/daily/${ds}" aria-label="${fmtDate(ds)}，${items.length} 项">
@@ -474,10 +474,12 @@ function calHtml() {
     </div>
     <div class="cal-week">${WEEK.map(w => `<span>${w}</span>`).join('')}</div>
     <div class="cal-grid ${calAnim}">${cells}</div>
-    <div class="cal-legend"><span><i class="dot ev"></i>事件提醒</span><span><i class="dot pl"></i>未完成的每日计划</span><span>点日期可以新增</span></div>`;
+    <div class="cal-legend"><span><i class="dot ev"></i>事件提醒</span>${msStatus() !== 'off' ? '<span><i class="dot ms"></i>Outlook / Teams</span>' : ''}<span><i class="dot pl"></i>未完成的每日计划</span><span>点日期可以新增</span></div>
+    ${msStatus() === 'ok' && msCalError ? `<p class="small" style="color:var(--bad);margin:6px 0 0">⚠️ Outlook 日历读取失败：${esc(msCalError)}</p>` : ''}`;
 }
 function redrawCal() { const el = $('#cal'); if (el) el.innerHTML = calHtml(); calAnim = ''; }
-function shiftCal(days) { calStart = addDays(calStart, days); calAnim = days > 0 ? 'slide-l' : 'slide-r'; redrawCal(); }
+function syncCal(force) { msSyncCalendar(calStart, 28, force).then(changed => { if (changed && currentRoute() === 'home') redrawCal(); }); }
+function shiftCal(days) { calStart = addDays(calStart, days); calAnim = days > 0 ? 'slide-l' : 'slide-r'; redrawCal(); syncCal(); }
 function bindCalSwipe() {
   const el = $('#cal');
   if (!el) return;
@@ -611,9 +613,10 @@ function backupNotice() {
 }
 function viewHome() {
   pageTitle = '';
-  after = () => { bindCalSwipe(); loadNews(false); };
+  after = () => { bindCalSwipe(); loadNews(false); syncCal(); msLoadMail(false); };
   return `${backupNotice()}
     <section class="card cal-card" id="cal">${calHtml()}</section>
+    <section class="card" id="mail">${mailHtml()}</section>
     <section class="card" id="news">${newsHtml()}</section>
     <h2 class="sec-title">💜 我的模块</h2>
     <div class="tiles">${tilesHtml()}</div>`;
@@ -636,6 +639,10 @@ function relLabel(ds) {
 function viewDaily(ds) {
   if (!ds || !/^\d{4}-\d{2}-\d{2}$/.test(ds)) ds = todayStr();
   pageTitle = '每日计划';
+  after = () => msSyncCalendar(mondayOf(parseYmd(ds)), 7).then(changed => {
+    const el = $('#msDay');
+    if (changed && el && el.dataset.date === ds) el.outerHTML = msDayHtml(ds);
+  });
   const t = todayStr(), d = parseYmd(ds);
   const plans = db.plans.filter(p => p.date === ds).sort((a, b) => (a.done - b.done) || (a.created - b.created));
   const evs = db.events.filter(e => e.date === ds).sort(byTime);
@@ -661,7 +668,21 @@ function viewDaily(ds) {
       ${evs.length ? `<ul class="ev-list">${evs.map(e => `<li data-act="ev-edit" data-id="${e.id}"><span class="ev-time">${e.time ? esc(e.time) : '全天'}</span>
         <div class="ev-body"><b>${esc(e.title)}</b>${e.note ? `<div class="muted small pre">${esc(e.note)}</div>` : ''}</div></li>`).join('')}</ul>` : '<p class="muted small">这天没有事件，点「新增」记一个约会或提醒</p>'}
     </section>
+    ${msDayHtml(ds)}
     ${overdue.length ? `<section class="card"><div class="sec-head"><h2>🌧️ 之前没做完的（${overdue.length}）</h2></div><ul class="checklist">${overdue.map(p => planLi(p, true)).join('')}</ul></section>` : ''}`;
+}
+
+function msDayHtml(ds) {
+  const st = msStatus();
+  if (st === 'off') return '';
+  const list = msEventsOn(ds).slice().sort(byTime);
+  let body;
+  if (st !== 'ok') body = `<p class="muted small">${st === 'expired' ? '微软登录过期了。' : '还没登录微软账号。'}</p><button class="btn primary sm" data-act="ms-login">${st === 'expired' ? '重新连接' : '连接 Microsoft 365'}</button>`;
+  else if (!list.length) body = '<p class="muted small">这天 Outlook / Teams 没有会议</p>';
+  else body = `<ul class="ev-list">${list.map(e => `<li class="ms-ev"><span class="ev-time">${e.allDay ? '全天' : esc(e.time)}${e.endTime ? `<br><span class="muted small">${esc(e.endTime)}</span>` : ''}</span>
+      <div class="ev-body"><b>${esc(e.title)}</b>${e.location ? `<div class="muted small">📍 ${esc(e.location)}</div>` : ''}
+      <div class="ms-links">${e.join ? `<a class="btn sm primary" href="${esc(safeUrl(e.join))}" target="_blank" rel="noopener noreferrer">加入 Teams 会议</a>` : ''}${e.link ? `<a class="btn sm" href="${esc(safeUrl(e.link))}" target="_blank" rel="noopener noreferrer">在 Outlook 打开</a>` : ''}</div></div></li>`).join('')}</ul>`;
+  return `<section class="card" id="msDay" data-date="${ds}"><div class="sec-head"><h2>📅 Outlook / Teams 会议</h2><span class="muted small">只读 · 在 Outlook 里修改</span></div>${body}</section>`;
 }
 
 /* ================= fitness ================= */
@@ -742,8 +763,33 @@ function viewSettings() {
     <section class="card"><div class="settings-row"><div><h2>🔒 PIN 锁</h2>
       <p class="muted small">打开 app 时要先输入 PIN，离开超过 5 分钟会自动上锁。PIN 只用来防别人随手打开，忘了的话只能清除浏览器数据（资料也会一起清掉），所以记得先备份。</p></div>
       <div class="detail-actions">${st.pinHash ? '<button class="btn" data-act="pin-set">修改 PIN</button><button class="btn danger" data-act="pin-off">关闭 PIN</button>' : '<button class="btn primary" data-act="pin-set">设置 PIN</button>'}</div></div></section>
+    ${msSettingsHtml()}
     <section class="card"><h2>📰 新闻</h2><p class="muted small">来源 New York Times（Asia Pacific、U.S. 版块），连不上时改用 BBC News。每天早上 9:00 之后第一次打开时自动更新，开着 app 过 9 点也会自动刷新。在中国内地可能连不上，香港可以正常使用。</p></section>
     <p class="muted small" style="text-align:center">Tina小作坊 · v1 · 做给 Tina 的小工作台 ♥</p>`;
+}
+function msSettingsHtml() {
+  const cfg = msCfg(), st = msStatus();
+  const status = {
+    off: '<span class="badge">还没设置</span>',
+    idle: '<span class="badge">还没登录</span>',
+    expired: '<span class="tag warn">登录过期</span>',
+    ok: `<span class="badge good">✓ 已连接${cfg.me ? ' · ' + esc(cfg.me.name || cfg.me.email) : ''}</span>`,
+  }[st];
+  return `<section class="card"><div class="sec-head"><h2>🔗 连接 Microsoft 365（Outlook / Teams）</h2>${status}</div>
+    <p class="muted small">只读：把 Outlook / Teams 会议显示在月历上，并在首页整理每日电邮。不会修改、删除或发送任何东西。登录凭证只存在这台设备里，不会导出到备份文件。</p>
+    <form data-ms-form novalidate>
+      <div class="form-grid">
+        ${fieldHtml({ k: 'clientId', label: '应用（客户端）ID', ph: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' }, cfg.clientId)}
+        ${fieldHtml({ k: 'tenantId', label: '目录（租户）ID', ph: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' }, cfg.tenantId)}
+      </div>
+      <p class="small">在 Azure 里要填的重定向 URI（平台选「单页应用程序 SPA」）：<br><code class="copy">${esc(msRedirectUri())}</code></p>
+      ${cfg.lastError ? `<p class="small ms-err">⚠️ 上次连接失败：${esc(cfg.lastError)}</p>` : ''}
+      <div class="detail-actions">
+        <button class="btn" type="submit">保存 ID</button>
+        ${cfg.clientId ? `<button type="button" class="btn primary" data-act="ms-login">${st === 'ok' ? '重新登录' : st === 'expired' ? '重新连接' : '用 Microsoft 账号登录'}</button>` : ''}
+        ${st === 'ok' || st === 'expired' ? '<button type="button" class="btn danger" data-act="ms-disconnect">断开连接</button>' : ''}
+      </div>
+    </form></section>`;
 }
 async function exportData() {
   const payload = JSON.stringify({ app: 'tina-workshop', version: 1, exportedAt: new Date().toISOString(), data: db }, null, 2);
@@ -803,7 +849,11 @@ $('#lockForm').addEventListener('submit', async e => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { hiddenAt = Date.now(); return; }
   if (db.settings.pinHash && hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) showLock();
-  else if (currentRoute() === 'home') loadNews(false);
+  else if (currentRoute() === 'home') {
+    loadNews(false); syncCal();
+    if (mailState.day < todayStr() && mailState.data && mailState.data.day === mailState.day) mailState.day = todayStr();
+    msLoadMail(false);
+  }
 });
 
 /* ================= actions ================= */
@@ -926,6 +976,14 @@ const ACTIONS = {
       commit('PIN 已设置');
     },
   }),
+  'ms-login': () => msLogin(),
+  'ms-disconnect': () => { if (confirm('断开后，月历上的 Outlook 会议和电邮总结会消失，确定吗？')) { msDisconnect(); commit('已断开连接'); } },
+  'mail-day': ({ n }) => {
+    const next = ymd(addDays(parseYmd(mailState.day), Number(n)));
+    if (next > todayStr()) return;
+    mailState.day = next; redrawMail(); msLoadMail(false);
+  },
+  'mail-refresh': () => msLoadMail(true),
   'pin-off': () => { if (confirm('确定关闭 PIN 锁吗？')) { delete db.settings.pinHash; commit('PIN 已关闭'); } },
 };
 function removeItem(mod, id) {
@@ -986,6 +1044,15 @@ document.addEventListener('submit', e => {
     commit('已添加');
     const input = $('[data-add-plan] input');
     if (input) input.focus();
+  } else if (f.matches('[data-ms-form]')) {
+    e.preventDefault();
+    const clientId = f.elements.clientId.value.trim(), tenantId = f.elements.tenantId.value.trim();
+    if (clientId && !GUID_RE.test(clientId)) return toast('应用 ID 格式不对，应该像 xxxxxxxx-xxxx-…');
+    if (tenantId && !GUID_RE.test(tenantId)) return toast('租户 ID 格式不对，应该像 xxxxxxxx-xxxx-…');
+    const old = msCfg();
+    if (old.clientId && old.clientId !== clientId) msDisconnect();
+    db.settings.ms = Object.assign({}, msCfg(), { clientId, tenantId, lastError: '' });
+    commit('已保存');
   } else if (f.matches('[data-fit-form]')) {
     e.preventDefault();
     const p = db.fitness.find(x => x.id === f.dataset.fitForm);
@@ -1068,7 +1135,10 @@ window.addEventListener('hashchange', () => render(true));
 
 /* ================= boot ================= */
 buildNav();
+mailState.day = todayStr();
+const msPending = msHandleRedirect(); // 微软登录回来时先把网址整理好
 if (db.settings.pinHash) showLock(); else render();
+if (msPending) msPending.then(() => render(false));
 scheduleNews();
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
