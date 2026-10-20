@@ -65,8 +65,13 @@ function commit(msg) { save(); render(false); if (msg) toast(msg); }
 
 /* ================= module config ================= */
 const STAGES = ['初步接触', '资料准备', 'KYC 审核', '开户中', '已签约', '暂停'];
-const STAGE_CLS = { '初步接触': 's1', '资料准备': 's2', 'KYC 审核': 's3', '开户中': 's4', '已签约': 's5', '暂停': 's0' };
+const ORG_STAGES = ['初步接触', '洽谈中', '准备签约', '已签约合作', '暂停'];
+const STAGE_CLS = { '初步接触': 's1', '资料准备': 's2', 'KYC 审核': 's3', '开户中': 's4', '已签约': 's5', '暂停': 's0', '洽谈中': 's2', '准备签约': 's4', '已签约合作': 's5' };
 const stagePill = s => s ? `<span class="pill ${STAGE_CLS[s] || ''}">${esc(s)}</span>` : dash;
+// 表格里直接改进度的小下拉框
+const stageSelect = (options, value, attrs) => `<select class="stage-select ${value ? STAGE_CLS[value] || '' : 'unset'}" ${attrs} aria-label="更新进度">
+  ${value ? '' : '<option value="" selected>未设置</option>'}${options.map(o => `<option${o === value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+const progMini = r => `<span class="mini"><span class="bar sm"><i style="width:${Number(r.progress) || 0}%"></i></span>${Number(r.progress) || 0}%</span>`;
 const txt = k => r => r[k] ? esc(r[k]) : dash;
 const bold = k => r => `<b>${esc(r[k])}</b>`;
 const clip = k => r => r[k] ? `<span class="clip">${esc(r[k])}</span>` : dash;
@@ -101,26 +106,31 @@ const TODO_FIELDS = [
   { k: 'due', label: '截止日期', type: 'date' },
   { k: 'progress', label: '事件进度', type: 'progress' },
 ];
-const partnerOrg = (title, nameLabel, shareLabel, childTitle) => ({
-  group: 'Prospera', title, kind: 'table', noun: nameLabel.replace('名字', ''), titleKey: 'name',
+const partnerOrg = (mod, title, nameLabel, shareLabel, statusLabel, childTitle) => ({
+  group: 'Prospera', title, kind: 'table', noun: nameLabel.replace('名字', ''), titleKey: 'name', statusKey: 'status',
   fields: [
     { k: 'name', label: nameLabel, req: true },
     { k: 'share', label: shareLabel, ph: '例如 30%' },
+    { k: 'status', label: statusLabel, type: 'select', options: ORG_STAGES },
+    { k: 'progress', label: '跟进进度', type: 'progress' },
     { k: 'contact', label: '对接人' },
-    { k: 'note', label: '备注', type: 'textarea' },
+    { k: 'lastFollow', label: '最近跟进日期', type: 'date' },
+    { k: 'note', label: '跟进记录 / 备注', type: 'textarea', rows: 4 },
   ],
   cols: [
     { label: nameLabel, get: bold('name') },
     { label: shareLabel, get: txt('share') },
+    { label: statusLabel, get: r => stageSelect(ORG_STAGES, r.status, `data-org-stage data-mod="${mod}" data-id="${r.id}"`) },
+    { label: '跟进进度', get: progMini },
     { label: '推荐客户数量', get: r => kids(r).length, cls: 'num' },
-    { label: '签约进度', get: signedCol },
+    { label: '客户签约情况', get: signedCol },
   ],
   child: { store: 'clients', noun: '客户', title: childTitle, fields: CLIENT_FIELDS },
 });
 
 const MODULES = {
-  'eam-bank': { ...partnerOrg('EAM 合作银行和券商跟进以及管理', '金融机构名字', '机构分红', '推荐客户'), store: 'eamBanks', noun: '机构' },
-  'eam-channel': { ...partnerOrg('EAM 渠道跟进以及管理', '渠道名字', '渠道分红', '渠道推荐的客户'), store: 'eamChannels', noun: '渠道' },
+  'eam-bank': { ...partnerOrg('eam-bank', 'EAM 合作银行和券商跟进以及管理', '金融机构名字', '机构分红', '合作进度', '推荐客户'), store: 'eamBanks', noun: '机构' },
+  'eam-channel': { ...partnerOrg('eam-channel', 'EAM 渠道跟进以及管理', '渠道名字', '渠道分红', '渠道进度', '渠道推荐的客户'), store: 'eamChannels', noun: '渠道' },
   'fund-project': {
     group: 'Prospera', title: '基金项目进度', kind: 'cards', store: 'fundProjects', noun: '基金项目', titleKey: 'project', progressLabel: '项目进度',
     fields: [
@@ -203,7 +213,7 @@ const findItem = (mod, id) => db[MODULES[mod].store].find(x => x.id === id);
 
 const NAV = [
   { href: '#/home', label: '首页', icon: '🏠' },
-  { href: '#/daily', label: '每日计划', icon: '📝' },
+  { group: '每日计划', items: [['#/daily', '每日计划 & 事件提醒']] },
   { group: 'Evereach', items: [['#/m/ev-todo', '待办事件'], ['#/m/ev-summary', '渠道总结']] },
   {
     group: 'Prospera', items: [
@@ -211,8 +221,8 @@ const NAV = [
       ['#/m/fund-todo', '基金待办事件'], ['#/m/hr', 'HR 会议记录及待办'], ['#/m/compliance', '公司合规待办'], ['#/m/partners', '合作方以及负责人'],
     ],
   },
-  { href: '#/fitness', label: '健身 Package', icon: '💪' },
-  { href: '#/settings', label: '设置与备份', icon: '⚙️' },
+  { group: '健身', items: [['#/fitness', '健身 Package']] },
+  { href: '#/settings', label: '设置与备份', icon: '⚙️', sep: true },
 ];
 
 /* ================= forms ================= */
@@ -404,16 +414,30 @@ function viewDetail(mod, id) {
       ${counts.length ? `<div class="stage-sum">${counts.map(([s, n]) => `<span class="pill ${STAGE_CLS[s]}">${esc(s)} ${n}</span>`).join('')}</div>` : ''}
       ${list.length ? `<div class="tbl-wrap"><table class="tbl">
         <thead><tr><th class="idx">#</th><th>客户名字</th><th>签约进度</th><th>资产规模</th><th>推荐日期</th><th>备注</th><th class="act">删除</th></tr></thead>
-        <tbody>${list.map((c, i) => `<tr data-act="child-edit" ${ids} data-cid="${c.id}"><td class="idx">${i + 1}</td><td><b>${esc(c.name)}</b></td><td>${stagePill(c.stage)}</td>
+        <tbody>${list.map((c, i) => `<tr data-act="child-edit" ${ids} data-cid="${c.id}"><td class="idx">${i + 1}</td><td><b>${esc(c.name)}</b></td>
+          <td>${stageSelect(STAGES, c.stage, `data-child-stage ${ids} data-cid="${c.id}"`)}</td>
           <td>${c.aum ? esc(c.aum) : dash}</td><td>${dateCol('date')(c)}</td><td>${clip('note')(c)}</td>
           <td class="act"><button class="icon-btn sm del" data-act="child-del" ${ids} data-cid="${c.id}" aria-label="删除">🗑</button></td></tr>`).join('')}</tbody>
       </table></div>` : emptyHtml(`还没有${C.noun}，点「新增${C.noun}」添加`)}
     </section>`;
   }
+  let progCard = '';
+  if (M.statusKey) {
+    const sf = M.fields.find(f => f.k === M.statusKey);
+    const prog = Number(x.progress) || 0;
+    progCard = `<section class="card prog-big">
+      <div class="prog-status"><span>${esc(sf.label)}</span>${stageSelect(sf.options, x[M.statusKey], `data-org-stage ${ids}`)}</div>
+      <div class="prog-label"><span>跟进进度</span><b data-prog-out>${prog}%</b></div>
+      <div class="bar big"><i data-prog-bar style="width:${prog}%"></i></div>
+      <input type="range" min="0" max="100" step="5" value="${prog}" data-prog ${ids} aria-label="调整跟进进度">
+    </section>`;
+  }
+  const kvFields = rest.filter(f => f.k !== M.statusKey);
   return `${crumbs(mod)}
     <div class="detail-head"><h1>${esc(x[M.titleKey])}</h1>
       <div class="detail-actions"><button class="btn sm" data-act="edit" ${ids}>✎ 编辑</button><button class="btn danger sm" data-act="del" ${ids}>删除</button></div></div>
-    <section class="card"><dl class="kv">${kvHtml(rest, x)}</dl></section>
+    ${progCard}
+    <section class="card"><dl class="kv">${kvHtml(kvFields, x)}</dl></section>
     ${child}`;
 }
 
@@ -914,6 +938,7 @@ function removeItem(mod, id) {
 }
 
 document.addEventListener('click', e => {
+  if (e.target.closest('select')) return; // 表格里的进度下拉框：只改进度，不打开详情
   const a = e.target.closest('[data-act]');
   if (a && !e.target.closest('input[type=checkbox], label')) {
     const fn = ACTIONS[a.dataset.act];
@@ -933,6 +958,13 @@ document.addEventListener('change', e => {
   } else if (t.matches('[data-prog]')) {
     const x = findItem(t.dataset.mod, t.dataset.id);
     if (x) { x.progress = Number(t.value); save(); toast('进度已更新'); }
+  } else if (t.matches('[data-org-stage]')) {
+    const x = findItem(t.dataset.mod, t.dataset.id);
+    if (x) { x[MODULES[t.dataset.mod].statusKey] = t.value; commit('进度已更新为「' + t.value + '」'); }
+  } else if (t.matches('[data-child-stage]')) {
+    const x = findItem(t.dataset.mod, t.dataset.id);
+    const c = x && kids(x).find(k => k.id === t.dataset.cid);
+    if (c) { c.stage = t.value; commit('签约进度已更新为「' + t.value + '」'); }
   } else if (t.id === 'importFile' && t.files[0]) {
     importData(t.files[0]); t.value = '';
   }
@@ -971,7 +1003,7 @@ function buildNav() {
   $('#drawer').innerHTML = `<div class="drawer-brand"><img src="icons/icon-192.png" alt=""><div><b>Tina小作坊</b><div class="muted small">我的小工作台</div></div></div>
     ${NAV.map(n => n.group
       ? `<div class="nav-group">${esc(n.group)}</div>${n.items.map(([h, l]) => `<a class="nav-link sub" href="${h}">${esc(l)}</a>`).join('')}`
-      : `<a class="nav-link" href="${n.href}"><span class="nav-ico">${n.icon}</span>${esc(n.label)}</a>`).join('')}
+      : `${n.sep ? '<div class="nav-sep"></div>' : ''}<a class="nav-link" href="${n.href}"><span class="nav-ico">${n.icon}</span>${esc(n.label)}</a>`).join('')}
     <div class="nav-foot">♥ 资料只存在这台设备里<br>记得定期到「设置与备份」导出</div>`;
 }
 function openDrawer() { $('#drawer').classList.add('open'); $('#scrim').classList.add('show'); $('#handle').classList.add('hide'); }
